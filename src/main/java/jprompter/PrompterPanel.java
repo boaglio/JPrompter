@@ -42,6 +42,7 @@ public class PrompterPanel extends JComponent {
     private boolean playing;
     private double countdownLeft;
     private double elapsedSeconds;
+    private double timedPps;
     private long lastTick;
     private final Timer timer = new Timer(1000 / 120, e -> tick());
 
@@ -97,7 +98,10 @@ public class PrompterPanel extends JComponent {
     public void play() {
         if (isPlaying()) return;
         if (offset >= docHeight && docHeight > 0) offset = 0;   // restart when at the end
-        countdownLeft = settings.countdownSeconds;
+        boolean fromTop = offset <= 0;
+        if (fromTop) { elapsedSeconds = 0; timedPps = 0; }   // starting from the top is a fresh run
+        // Count down only before a fresh run; resuming after a pause continues at once.
+        countdownLeft = fromTop ? settings.countdownSeconds : 0;
         playing = true;
         lastTick = System.nanoTime();
         timer.start();
@@ -117,12 +121,18 @@ public class PrompterPanel extends JComponent {
         pause();
         offset = 0;
         elapsedSeconds = 0;
+        timedPps = 0;
         stateListener.run();
         repaint();
     }
 
+    /** Faster (delta > 0) or slower. In time mode this shortens or lengthens the target by 5 s per step. */
     public void changeSpeed(int delta) {
-        settings.speed = Settings.clamp(settings.speed + delta, Settings.MIN_SPEED, Settings.MAX_SPEED);
+        if (isTimed()) {
+            settings.targetSeconds = Settings.clamp(targetSeconds() - delta * 5, Settings.MIN_TARGET, Settings.MAX_TARGET);
+        } else {
+            settings.speed = Settings.clamp(settings.speed + delta, Settings.MIN_SPEED, Settings.MAX_SPEED);
+        }
         stateListener.run();
         repaint();
     }
@@ -168,9 +178,40 @@ public class PrompterPanel extends JComponent {
 
     public double elapsedSeconds() { return elapsedSeconds; }
 
+    public boolean isTimed() { return settings.pace == Settings.Pace.TIME; }
+
+    public int targetSeconds() { return settings.targetSeconds > 0 ? settings.targetSeconds : 60; }
+
     public double pixelsPerSecond() {
+        return isTimed() ? timedPixelsPerSecond() : speedToPixels(settings.speed);
+    }
+
+    /** The current speed on the same 1–100 scale as the manual speed setting. */
+    public int effectiveSpeed() {
+        ensureLayout();
+        return (int) Math.round(pixelsPerSecond() * 20.0 / lineHeight);
+    }
+
+    private double speedToPixels(double speed) {
         // speed 20 == one line per second; scales with font size so reading pace is stable.
-        return settings.speed * lineHeight / 20.0;
+        return speed * lineHeight / 20.0;
+    }
+
+    /**
+     * Remaining text divided by remaining time, recomputed every frame so the run stays on schedule
+     * after pauses, nudges or layout changes. After scrolling back, catching up is capped at twice the
+     * script's average speed (or the maximum manual speed, if higher) so the text never races by.
+     */
+    private double timedPixelsPerSecond() {
+        double distance = Math.max(0, docHeight - offset);
+        double timeLeft = targetSeconds() - elapsedSeconds;
+        if (timeLeft >= 1) {
+            timedPps = distance / timeLeft;
+        } else if (timedPps <= 0) {
+            timedPps = speedToPixels(settings.speed);   // already out of time: fall back to the manual speed
+        }
+        double cap = Math.max(speedToPixels(Settings.MAX_SPEED), 2 * docHeight / targetSeconds());
+        return Math.min(timedPps, cap);
     }
 
     public double remainingSeconds() {
@@ -374,10 +415,10 @@ public class PrompterPanel extends JComponent {
         Color fg = settings.textColor;
         g.setColor(fg);
         g.setFont(new Font("Inter", Font.BOLD, 26));
-        centered(g, "Nothing to prompt yet", w, y);
+        centered(g, I18n.t("empty.title"), w, y);
         g.setColor(new Color(fg.getRed(), fg.getGreen(), fg.getBlue(), 150));
         g.setFont(new Font("Inter", Font.PLAIN, 16));
-        centered(g, "Write or paste your script in the editor (Ctrl+E), open a file, or drop one here.", w, y + 34);
+        centered(g, I18n.t("empty.message"), w, y + 34);
     }
 
     private static void centered(Graphics2D g, String s, int w, int baseline) {
@@ -392,9 +433,9 @@ public class PrompterPanel extends JComponent {
         g.fillRect(0, h - barH, (int) Math.round(w * progress()), barH);
 
         String[] texts = {
-                countdownLeft > 0 ? "Starting" : playing ? "Playing" : "Paused",
-                String.valueOf(settings.speed),
-                fmt(elapsedSeconds),
+                I18n.t(countdownLeft > 0 ? "hud.starting" : playing ? "hud.playing" : "hud.paused"),
+                isTimed() ? I18n.t("hud.auto", effectiveSpeed()) : String.valueOf(settings.speed),
+                isTimed() ? fmt(elapsedSeconds) + " / " + fmt(targetSeconds()) : fmt(elapsedSeconds),
                 "-" + fmt(remainingSeconds()),
                 Math.round(progress() * 100) + "%"
         };

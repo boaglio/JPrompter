@@ -37,22 +37,6 @@ public class JPrompter extends JFrame {
     private static final String EDITOR = "editor", PROMPTER = "prompter";
     private static final int WORDS_PER_MINUTE = 140;
 
-    private static final String SAMPLE = """
-            Welcome to JPrompter.
-
-            Paste or type your script in the editor, or open a text file (you can also drag and drop one onto the window). Press F5 or the Play button to start prompting.
-
-            [Pause — smile] Anything inside square brackets is shown as a cue in a different color, so you can add stage directions that stand out.
-
-            Keyboard shortcuts while prompting:
-            Space starts and pauses. Up and Down change the speed. Left and Right nudge the text one line. Page Up and Page Down jump between paragraphs. Home goes back to the start. Plus and minus change the text size. M mirrors the text, V flips it vertically, G toggles the reading guide and H the status overlay. F11 toggles full screen and Escape leaves it. Ctrl+E switches between the editor and the prompter.
-
-            You can also scroll with the mouse wheel or drag the text, which works even while it is playing.
-
-            Most USB presentation clickers and foot pedals send Page Up, Page Down or Space, so they work out of the box.
-
-            Good luck with your recording!
-            """;
 
     private final Settings settings;
     private final PrompterPanel prompter;
@@ -66,7 +50,13 @@ public class JPrompter extends JFrame {
     private JButton playButton, themeButton;
     private JToggleButton editButton, promptButton, mirrorButton;
     private JSlider speedSlider, sizeSlider;
-    private JLabel speedValue, sizeValue;
+    private JLabel speedValue, sizeValue, autoSpeedValue;
+    private JToggleButton paceSpeedButton, paceTimeButton;
+    private JRadioButtonMenuItem paceSpeedItem, paceTimeItem;
+    private final CardLayout paceCards = new CardLayout();
+    private final JPanel paceControls = new JPanel(paceCards);
+    private DurationSpinner durationSpinner;
+    private final java.util.Map<I18n.Language, JRadioButtonMenuItem> languageItems = new java.util.EnumMap<>(I18n.Language.class);
     private JLabel fileLabel, wordsLabel, readTimeLabel;
     private JLabel modeStatus, elapsedStatus, remainingStatus, percentStatus;
     private JProgressBar progressBar;
@@ -78,11 +68,14 @@ public class JPrompter extends JFrame {
     private boolean fullscreen;
     private Rectangle windowedBounds;
     private boolean updatingControls;
+    /** Pushes editor text to the prompter shortly after typing stops, so time mode can size its speed. */
+    private final Timer textSync;
 
     public JPrompter(Settings settings) {
         super("JPrompter");
         this.settings = settings;
         this.prompter = new PrompterPanel(settings);
+        this.textSync = new Timer(300, e -> prompter.setText(editor.getText()));
         setIconImages(Icons.windowIcons());
         setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
         addWindowListener(new WindowAdapter() {
@@ -101,8 +94,9 @@ public class JPrompter extends JFrame {
         getContentPane().add(center, BorderLayout.CENTER);
         getContentPane().add(statusBar, BorderLayout.SOUTH);
 
+        textSync.setRepeats(false);
         prompter.setStateListener(this::syncControls);
-        editor.setText(SAMPLE);
+        editor.setText(I18n.t("sample"));
         editor.setCaretPosition(0);
         undo.discardAllEdits();
         modified = false;
@@ -120,13 +114,13 @@ public class JPrompter extends JFrame {
         toolbar.setFloatable(false);
         toolbar.setBorder(new EmptyBorder(6, 10, 6, 10));
 
-        toolbar.add(iconButton("new", "New script (Ctrl+N)", this::newFile));
-        toolbar.add(iconButton("open", "Open a text file (Ctrl+O)", this::openFile));
-        toolbar.add(iconButton("save", "Save (Ctrl+S)", this::save));
+        toolbar.add(iconButton("new", I18n.t("toolbar.new"), this::newFile));
+        toolbar.add(iconButton("open", I18n.t("toolbar.open"), this::openFile));
+        toolbar.add(iconButton("save", I18n.t("toolbar.save"), this::save));
         toolbar.addSeparator(new Dimension(18, 24));
 
-        editButton = modeToggle("Edit", "edit", "Edit the script (Ctrl+E)", this::showEditor);
-        promptButton = modeToggle("Prompt", "prompter", "Show the prompter (Ctrl+E)", this::showPrompter);
+        editButton = modeToggle(I18n.t("mode.edit"), "edit", I18n.t("mode.edit.tip"), this::showEditor);
+        promptButton = modeToggle(I18n.t("mode.prompt"), "prompter", I18n.t("mode.prompt.tip"), this::showPrompter);
         ButtonGroup modes = new ButtonGroup();
         modes.add(editButton);
         modes.add(promptButton);
@@ -134,9 +128,9 @@ public class JPrompter extends JFrame {
         toolbar.add(promptButton);
         toolbar.addSeparator(new Dimension(18, 24));
 
-        toolbar.add(iconButton("restart", "Back to the beginning (Home)", () -> { showPrompter(); prompter.reset(); }));
-        playButton = new JButton("Play", Icons.colored("play", 16, Color.WHITE));
-        playButton.setToolTipText("Start / pause (Space, F5)");
+        toolbar.add(iconButton("restart", I18n.t("toolbar.restart"), () -> { showPrompter(); prompter.reset(); }));
+        playButton = new JButton(I18n.t("play.play"), Icons.colored("play", 16, Color.WHITE));
+        playButton.setToolTipText(I18n.t("play.tip"));
         playButton.setFocusable(false);
         playButton.setIconTextGap(8);
         playButton.putClientProperty(FlatClientProperties.STYLE,
@@ -144,6 +138,12 @@ public class JPrompter extends JFrame {
                         + " pressedBackground: #6A5AE0; borderWidth: 0; focusWidth: 0; innerFocusWidth: 0;"
                         + " margin: 6,16,6,20; font: bold +1");
         playButton.addActionListener(e -> playPause());
+        // Size for the longer of the two labels so the button doesn't change width when toggled.
+        playButton.setText(I18n.t("play.pause"));
+        Dimension pauseSize = playButton.getPreferredSize();
+        playButton.setText(I18n.t("play.play"));
+        Dimension playSize = playButton.getPreferredSize();
+        playButton.setPreferredSize(new Dimension(Math.max(pauseSize.width, playSize.width), playSize.height));
         // Wrapped in a panel so FlatLaf paints it as a regular (filled) button, not a flat toolbar button.
         JPanel playWrap = new JPanel(new FlowLayout(FlowLayout.CENTER, 6, 0));
         playWrap.setOpaque(false);
@@ -152,32 +152,72 @@ public class JPrompter extends JFrame {
         toolbar.add(playWrap);
         toolbar.addSeparator(new Dimension(18, 24));
 
+        // Pace: choose the speed by hand, or set a duration and let the speed follow from it.
+        paceSpeedButton = paceToggle(I18n.t("pace.speed"), I18n.t("pace.speed.tip"), Settings.Pace.SPEED);
+        paceTimeButton = paceToggle(I18n.t("pace.time"), I18n.t("pace.time.tip"), Settings.Pace.TIME);
+        ButtonGroup paces = new ButtonGroup();
+        paces.add(paceSpeedButton);
+        paces.add(paceTimeButton);
+        toolbar.add(paceSpeedButton);
+        toolbar.add(paceTimeButton);
+        toolbar.add(Box.createHorizontalStrut(6));
+
         speedValue = valueLabel();
         speedSlider = slider(Settings.MIN_SPEED, Settings.MAX_SPEED, settings.speed, v -> {
             settings.speed = v;
             syncControls();
         });
-        toolbar.add(labeled("speed", "Scroll speed (Up / Down)", speedSlider, speedValue));
-        toolbar.add(Box.createHorizontalStrut(10));
+        paceControls.setOpaque(false);
+        paceControls.add(labeled("speed", I18n.t("speed.tip"), speedSlider, speedValue), Settings.Pace.SPEED.name());
+
+        durationSpinner = new DurationSpinner(prompter.targetSeconds(), v -> {
+            if (updatingControls) return;
+            settings.targetSeconds = v;
+            prompter.settingsChanged();
+        });
+        String timeTip = I18n.t("time.tip");
+        durationSpinner.setToolTipText(timeTip);
+        JFormattedTextField durationField = durationSpinner.getTextField();
+        durationField.setToolTipText(timeTip);
+        // Enter commits the time and hands the keyboard back to the prompter.
+        durationField.addActionListener(e -> { durationSpinner.commit(); focusPrompter(); });
+        autoSpeedValue = valueLabel();
+        autoSpeedValue.setToolTipText(I18n.t("time.autoSpeed.tip"));
+        JPanel timePanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+        timePanel.setOpaque(false);
+        JLabel timerIcon = new JLabel(Icons.get("timer", 20));
+        timerIcon.setToolTipText(timeTip);
+        timePanel.add(timerIcon);
+        timePanel.add(durationSpinner);
+        timePanel.add(autoSpeedValue);
+        paceControls.add(timePanel, Settings.Pace.TIME.name());
+        Dimension pc = paceControls.getPreferredSize();
+        paceControls.setMaximumSize(pc);
+        toolbar.add(paceControls);
+        toolbar.addSeparator(new Dimension(18, 24));
 
         sizeValue = valueLabel();
         sizeSlider = slider(Settings.MIN_FONT, Settings.MAX_FONT, settings.fontSize, v -> {
             settings.fontSize = v;
             prompter.settingsChanged();
         });
-        toolbar.add(labeled("textsize", "Text size (+ / -)", sizeSlider, sizeValue));
+        toolbar.add(labeled("textsize", I18n.t("size.tip"), sizeSlider, sizeValue));
 
         toolbar.add(Box.createHorizontalGlue());
 
         mirrorButton = new JToggleButton(Icons.get("mirror", 20));
-        mirrorButton.setToolTipText("Mirror horizontally for teleprompter glass (M)");
+        mirrorButton.setToolTipText(I18n.t("toolbar.mirror"));
         mirrorButton.setFocusable(false);
-        mirrorButton.addActionListener(e -> { settings.mirrorHorizontal = mirrorButton.isSelected(); prompter.settingsChanged(); });
+        mirrorButton.addActionListener(e -> {
+            settings.mirrorHorizontal = mirrorButton.isSelected();
+            prompter.settingsChanged();
+            focusPrompter();
+        });
         toolbar.add(mirrorButton);
-        toolbar.add(iconButton("fullscreen", "Full screen (F11, Esc to leave)", this::toggleFullscreen));
-        themeButton = iconButton(settings.darkTheme ? "sun" : "moon", "Switch light / dark theme", this::toggleTheme);
+        toolbar.add(iconButton("fullscreen", I18n.t("toolbar.fullscreen"), this::toggleFullscreen));
+        themeButton = iconButton(settings.darkTheme ? "sun" : "moon", I18n.t("toolbar.theme"), this::toggleTheme);
         toolbar.add(themeButton);
-        toolbar.add(iconButton("settings", "Settings (Ctrl+,)", this::openSettings));
+        toolbar.add(iconButton("settings", I18n.t("toolbar.settings"), this::openSettings));
     }
 
     private JComponent buildEditorPage() {
@@ -185,12 +225,13 @@ public class JPrompter extends JFrame {
         editor.setWrapStyleWord(true);
         editor.setFont(new Font(FlatInterFont.FAMILY, Font.PLAIN, 18));
         editor.setMargin(new Insets(18, 22, 18, 22));
-        editor.putClientProperty(FlatClientProperties.PLACEHOLDER_TEXT, "Write or paste your script here…");
+        editor.putClientProperty(FlatClientProperties.PLACEHOLDER_TEXT, I18n.t("editor.placeholder"));
         editor.getDocument().addUndoableEditListener(e -> undo.addEdit(e.getEdit()));
         editor.getDocument().addDocumentListener(new DocumentListener() {
             void changed() {
                 if (!modified) { modified = true; updateTitle(); }
                 updateEditorStats();
+                textSync.restart();
             }
             @Override public void insertUpdate(DocumentEvent e) { changed(); }
             @Override public void removeUpdate(DocumentEvent e) { changed(); }
@@ -208,7 +249,7 @@ public class JPrompter extends JFrame {
         editor.getActionMap().put("redo", action(() -> { if (undo.canRedo()) undo.redo(); }));
 
         // Header: title + file name on the left, stats on the right.
-        JLabel title = new JLabel("Script");
+        JLabel title = new JLabel(I18n.t("editor.title"));
         title.putClientProperty(FlatClientProperties.STYLE_CLASS, "h2");
         fileLabel = new JLabel();
         fileLabel.setForeground(UIManager.getColor("Label.disabledForeground"));
@@ -239,7 +280,7 @@ public class JPrompter extends JFrame {
         body.setBorder(new EmptyBorder(0, 22, 0, 22));
         body.add(scroll);
 
-        JLabel hint = new JLabel("Press F5 to start prompting  ·  [Text in brackets] becomes a highlighted cue  ·  Drop a .txt file to open it",
+        JLabel hint = new JLabel(I18n.t("editor.hint"),
                 Icons.muted("info", 14), SwingConstants.LEADING);
         hint.putClientProperty(FlatClientProperties.STYLE_CLASS, "small");
         hint.setForeground(UIManager.getColor("Label.disabledForeground"));
@@ -255,9 +296,9 @@ public class JPrompter extends JFrame {
     private void buildStatusBar() {
         modeStatus = statusLabel("edit");
         elapsedStatus = statusLabel("clock");
-        elapsedStatus.setToolTipText("Elapsed time");
+        elapsedStatus.setToolTipText(I18n.t("status.elapsed.tip"));
         remainingStatus = statusLabel("timer");
-        remainingStatus.setToolTipText("Estimated time remaining at the current speed");
+        remainingStatus.setToolTipText(I18n.t("status.remaining.tip"));
         percentStatus = statusLabel(null);
 
         progressBar = new JProgressBar(0, 1000);
@@ -288,41 +329,59 @@ public class JPrompter extends JFrame {
         int menu = Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx();
         JMenuBar bar = new JMenuBar();
 
-        JMenu file = new JMenu("File");
-        file.setMnemonic('F');
-        file.add(item("New", "new", KeyStroke.getKeyStroke(KeyEvent.VK_N, menu), this::newFile));
-        file.add(item("Open…", "open", KeyStroke.getKeyStroke(KeyEvent.VK_O, menu), this::openFile));
-        file.add(item("Save", "save", KeyStroke.getKeyStroke(KeyEvent.VK_S, menu), this::save));
-        file.add(item("Save As…", null, KeyStroke.getKeyStroke(KeyEvent.VK_S, menu | InputEvent.SHIFT_DOWN_MASK), this::saveAs));
+        JMenu file = menu("menu.file");
+        file.add(item(I18n.t("menu.file.new"), "new", KeyStroke.getKeyStroke(KeyEvent.VK_N, menu), this::newFile));
+        file.add(item(I18n.t("menu.file.open"), "open", KeyStroke.getKeyStroke(KeyEvent.VK_O, menu), this::openFile));
+        file.add(item(I18n.t("menu.file.save"), "save", KeyStroke.getKeyStroke(KeyEvent.VK_S, menu), this::save));
+        file.add(item(I18n.t("menu.file.saveAs"), null, KeyStroke.getKeyStroke(KeyEvent.VK_S, menu | InputEvent.SHIFT_DOWN_MASK), this::saveAs));
         file.addSeparator();
-        file.add(item("Paste from clipboard and prompt", "clipboard", null, this::pasteAndPrompt));
+        file.add(item(I18n.t("menu.file.paste"), "clipboard", null, this::pasteAndPrompt));
         file.addSeparator();
-        file.add(item("Exit", "exit", KeyStroke.getKeyStroke(KeyEvent.VK_Q, menu), this::exit));
+        file.add(item(I18n.t("menu.file.exit"), "exit", KeyStroke.getKeyStroke(KeyEvent.VK_Q, menu), this::exit));
         bar.add(file);
 
-        JMenu view = new JMenu("View");
-        view.setMnemonic('V');
-        view.add(item("Editor / Prompter", "prompter", KeyStroke.getKeyStroke(KeyEvent.VK_E, menu), this::toggleMode));
-        view.add(item("Full screen", "fullscreen", KeyStroke.getKeyStroke("F11"), this::toggleFullscreen));
-        view.add(item("Mirror", "mirror", null, () -> toggle(() -> settings.mirrorHorizontal = !settings.mirrorHorizontal)));
-        view.add(item("Reading guide", "guide", null, () -> toggle(() -> settings.showGuide = !settings.showGuide)));
+        JMenu view = menu("menu.view");
+        view.add(item(I18n.t("menu.view.toggleMode"), "prompter", KeyStroke.getKeyStroke(KeyEvent.VK_E, menu), this::toggleMode));
+        view.add(item(I18n.t("menu.view.fullscreen"), "fullscreen", KeyStroke.getKeyStroke("F11"), this::toggleFullscreen));
+        view.add(item(I18n.t("menu.view.mirror"), "mirror", null, () -> toggle(() -> settings.mirrorHorizontal = !settings.mirrorHorizontal)));
+        view.add(item(I18n.t("menu.view.guide"), "guide", null, () -> toggle(() -> settings.showGuide = !settings.showGuide)));
         view.addSeparator();
-        view.add(item("Light / dark theme", "moon", null, this::toggleTheme));
-        view.add(item("Settings…", "settings", KeyStroke.getKeyStroke(KeyEvent.VK_COMMA, menu), this::openSettings));
+        view.add(item(I18n.t("menu.view.theme"), "moon", null, this::toggleTheme));
+        JMenu languages = new JMenu(I18n.t("menu.view.language"));
+        languages.setIcon(Icons.get("text", 16));
+        ButtonGroup languageGroup = new ButtonGroup();
+        for (I18n.Language lang : I18n.Language.values()) {
+            JRadioButtonMenuItem li = new JRadioButtonMenuItem(lang.toString(), lang == I18n.language());
+            li.addActionListener(e -> changeLanguage(lang));
+            languageGroup.add(li);
+            languages.add(li);
+            languageItems.put(lang, li);
+        }
+        view.add(languages);
+        view.add(item(I18n.t("menu.view.settings"), "settings", KeyStroke.getKeyStroke(KeyEvent.VK_COMMA, menu), this::openSettings));
         bar.add(view);
 
-        JMenu play = new JMenu("Playback");
-        play.setMnemonic('P');
-        play.add(item("Play / Pause", "play", KeyStroke.getKeyStroke("F5"), this::playPause));
-        play.add(item("Restart", "restart", null, () -> { showPrompter(); prompter.reset(); }));
+        JMenu play = menu("menu.playback");
+        play.add(item(I18n.t("menu.playback.playPause"), "play", KeyStroke.getKeyStroke("F5"), this::playPause));
+        play.add(item(I18n.t("menu.playback.restart"), "restart", null, () -> { showPrompter(); prompter.reset(); }));
         play.addSeparator();
-        play.add(item("Faster", null, null, () -> prompter.changeSpeed(1)));
-        play.add(item("Slower", null, null, () -> prompter.changeSpeed(-1)));
+        paceSpeedItem = new JRadioButtonMenuItem(I18n.t("menu.playback.paceSpeed"), Icons.get("speed", 16));
+        paceSpeedItem.addActionListener(e -> setPace(Settings.Pace.SPEED));
+        paceTimeItem = new JRadioButtonMenuItem(I18n.t("menu.playback.paceTime"), Icons.get("timer", 16));
+        paceTimeItem.addActionListener(e -> setPace(Settings.Pace.TIME));
+        ButtonGroup paceItems = new ButtonGroup();
+        paceItems.add(paceSpeedItem);
+        paceItems.add(paceTimeItem);
+        play.add(paceSpeedItem);
+        play.add(paceTimeItem);
+        play.addSeparator();
+        play.add(item(I18n.t("menu.playback.faster"), null, null, () -> prompter.changeSpeed(1)));
+        play.add(item(I18n.t("menu.playback.slower"), null, null, () -> prompter.changeSpeed(-1)));
         bar.add(play);
 
-        JMenu help = new JMenu("Help");
-        help.add(item("Keyboard shortcuts", "keyboard", KeyStroke.getKeyStroke("F1"), this::showHelp));
-        help.add(item("About JPrompter", "info", null, this::showAbout));
+        JMenu help = new JMenu(I18n.t("menu.help"));
+        help.add(item(I18n.t("menu.help.shortcuts"), "keyboard", KeyStroke.getKeyStroke("F1"), this::showHelp));
+        help.add(item(I18n.t("menu.help.about"), "info", null, this::showAbout));
         bar.add(help);
         return bar;
     }
@@ -352,6 +411,7 @@ public class JPrompter extends JFrame {
         bind("V", () -> toggle(() -> settings.mirrorVertical = !settings.mirrorVertical));
         bind("G", () -> toggle(() -> settings.showGuide = !settings.showGuide));
         bind("H", () -> toggle(() -> settings.showHud = !settings.showHud));
+        bind("T", () -> setPace(prompter.isTimed() ? Settings.Pace.SPEED : Settings.Pace.TIME));
         bind("F", this::toggleFullscreen);
         bind("ESCAPE", () -> { if (fullscreen) toggleFullscreen(); else prompter.pause(); });
     }
@@ -366,12 +426,22 @@ public class JPrompter extends JFrame {
     // ---------------------------------------------------------------- actions
 
     private void playPause() {
+        durationSpinner.commit();   // a time typed but not yet applied must count for this run
         if (!prompterShown) {
             showPrompter();
             prompter.play();
         } else {
             prompter.togglePlay();
+            focusPrompter();
         }
+    }
+
+    /**
+     * Toolbar buttons don't take focus, so after typing in the duration field the keyboard would stay
+     * there and Space would type instead of pausing. Hand the keyboard back to the prompter.
+     */
+    private void focusPrompter() {
+        if (prompterShown) prompter.requestFocusInWindow();
     }
 
     private void toggleMode() {
@@ -398,6 +468,53 @@ public class JPrompter extends JFrame {
     private void toggle(Runnable change) {
         change.run();
         prompter.settingsChanged();
+    }
+
+    private void setPace(Settings.Pace pace) {
+        if (pace == Settings.Pace.TIME && settings.targetSeconds <= 0) {
+            settings.targetSeconds = estimatedReadingSeconds();
+        }
+        settings.pace = pace;
+        prompter.settingsChanged();
+        focusPrompter();
+    }
+
+    /** Reading time at {@link #WORDS_PER_MINUTE}, rounded to 15 s; the starting point for time mode. */
+    private int estimatedReadingSeconds() {
+        double seconds = wordCount() * 60.0 / WORDS_PER_MINUTE;
+        return Settings.clamp((int) Math.round(seconds / 15) * 15, Settings.MIN_TARGET, Settings.MAX_TARGET);
+    }
+
+    /**
+     * Switches the UI language by rebuilding the window in place. The script, file, unsaved state and
+     * view carry over; an untouched sample script is replaced by the sample in the new language.
+     */
+    private void changeLanguage(I18n.Language lang) {
+        if (lang == I18n.language()) return;
+        boolean untouchedSample = !modified && currentFile == null && editor.getText().equals(I18n.t("sample"));
+        boolean settingsOpen = settingsDialog != null && settingsDialog.isVisible();
+        if (fullscreen) toggleFullscreen();
+        prompter.pause();
+        if (settingsDialog != null) settingsDialog.dispose();
+
+        settings.language = lang.code;
+        I18n.setLanguage(lang);
+
+        JPrompter next = new JPrompter(settings);
+        if (!untouchedSample) {
+            next.editor.setText(editor.getText());
+            next.editor.setCaretPosition(0);
+            next.undo.discardAllEdits();
+            next.currentFile = currentFile;
+            next.modified = modified;
+        }
+        next.setBounds(getBounds());
+        next.setExtendedState(getExtendedState());
+        if (prompterShown) next.showPrompter();
+        next.updateTitle();
+        dispose();
+        next.setVisible(true);
+        if (settingsOpen) next.openSettings();
     }
 
     private void toggleTheme() {
@@ -450,27 +567,16 @@ public class JPrompter extends JFrame {
     private void openSettings() {
         if (settingsDialog != null) settingsDialog.dispose();
         // Recreated each time so it reflects changes made with keyboard shortcuts.
-        settingsDialog = new SettingsDialog(this, settings, prompter::settingsChanged, this::openSettings);
+        settingsDialog = new SettingsDialog(this, settings, prompter::settingsChanged, this::openSettings, this::changeLanguage);
         settingsDialog.setVisible(true);
     }
 
     private void showHelp() {
-        String[][] keys = {
-                {"Space · Enter · F5", "Play / pause (with countdown)"},
-                {"↑ ↓", "Faster / slower (Shift = ×5)"},
-                {"← →", "Nudge back / forward one line"},
-                {"PgUp · PgDn", "Previous / next paragraph (Shift = screen)"},
-                {"Home · End", "Start / end of script"},
-                {"+ −", "Larger / smaller text"},
-                {"M · V", "Mirror horizontally / vertically"},
-                {"G · H", "Reading guide / status overlay"},
-                {"F · F11 · Esc", "Enter / leave full screen"},
-                {"Ctrl+E", "Switch editor / prompter"},
-                {"Wheel · drag", "Scroll manually"},
-        };
+        String[] shortcuts = {"play", "speed", "pace", "nudge", "paragraph", "startEnd", "size", "mirror",
+                "guide", "fullscreen", "mode", "scroll"};
         JPanel grid = new JPanel(new GridBagLayout());
-        for (int i = 0; i < keys.length; i++) {
-            JLabel key = new JLabel(keys[i][0]);
+        for (int i = 0; i < shortcuts.length; i++) {
+            JLabel key = new JLabel(I18n.t("shortcut." + shortcuts[i] + ".keys"));
             key.putClientProperty(FlatClientProperties.STYLE,
                     "font: bold; border: 3,9,3,9,$Component.borderColor,1,8; background: $Panel.background");
             GridBagConstraints c = new GridBagConstraints();
@@ -478,9 +584,9 @@ public class JPrompter extends JFrame {
             grid.add(key, c);
             c = new GridBagConstraints();
             c.gridx = 1; c.gridy = i; c.anchor = GridBagConstraints.WEST;
-            grid.add(new JLabel(keys[i][1]), c);
+            grid.add(new JLabel(I18n.t("shortcut." + shortcuts[i])), c);
         }
-        JOptionPane.showMessageDialog(this, grid, "Keyboard shortcuts", JOptionPane.PLAIN_MESSAGE, null);
+        JOptionPane.showMessageDialog(this, grid, I18n.t("shortcuts.title"), JOptionPane.PLAIN_MESSAGE, null);
     }
 
     private void showAbout() {
@@ -489,10 +595,10 @@ public class JPrompter extends JFrame {
         JLabel name = new JLabel("JPrompter");
         name.putClientProperty(FlatClientProperties.STYLE_CLASS, "h1");
         name.setAlignmentX(Component.CENTER_ALIGNMENT);
-        JLabel version = new JLabel("Version " + VERSION);
+        JLabel version = new JLabel(I18n.t("about.version", VERSION));
         version.setForeground(UIManager.getColor("Label.disabledForeground"));
         version.setAlignmentX(Component.CENTER_ALIGNMENT);
-        JLabel desc = new JLabel("A free and open source teleprompter for your desktop.");
+        JLabel desc = new JLabel(I18n.t("about.description"));
         desc.setAlignmentX(Component.CENTER_ALIGNMENT);
         JButton link = new JButton(WEBSITE);
         link.putClientProperty(FlatClientProperties.BUTTON_TYPE, FlatClientProperties.BUTTON_TYPE_BORDERLESS);
@@ -503,10 +609,10 @@ public class JPrompter extends JFrame {
             try {
                 Desktop.getDesktop().browse(URI.create(WEBSITE));
             } catch (Exception ex) {
-                error("Could not open the browser: " + ex.getMessage());
+                error(I18n.t("error.browser", ex.getMessage()));
             }
         });
-        JLabel license = new JLabel("Licensed under the GNU GPL v3.0");
+        JLabel license = new JLabel(I18n.t("about.license"));
         license.putClientProperty(FlatClientProperties.STYLE_CLASS, "small");
         license.setForeground(UIManager.getColor("Label.disabledForeground"));
         license.setAlignmentX(Component.CENTER_ALIGNMENT);
@@ -523,7 +629,7 @@ public class JPrompter extends JFrame {
         p.add(link);
         p.add(Box.createVerticalStrut(6));
         p.add(license);
-        JOptionPane.showMessageDialog(this, p, "About JPrompter", JOptionPane.PLAIN_MESSAGE, null);
+        JOptionPane.showMessageDialog(this, p, I18n.t("about.title"), JOptionPane.PLAIN_MESSAGE, null);
     }
 
     // ---------------------------------------------------------------- files
@@ -564,7 +670,7 @@ public class JPrompter extends JFrame {
             prompter.reset();
             updateTitle();
         } catch (IOException e) {
-            error("Could not open " + f.getName() + ":\n" + e.getMessage());
+            error(I18n.t("error.open", f.getName(), e.getMessage()));
         }
     }
 
@@ -579,7 +685,8 @@ public class JPrompter extends JFrame {
         File f = fc.getSelectedFile();
         if (!f.getName().contains(".")) f = new File(f.getParentFile(), f.getName() + ".txt");
         if (f.exists() && !f.equals(currentFile)
-                && JOptionPane.showConfirmDialog(this, f.getName() + " exists. Overwrite?", "Save As",
+                && JOptionPane.showConfirmDialog(this, I18n.t("dialog.overwrite.message", f.getName()),
+                I18n.t("dialog.overwrite.title"),
                 JOptionPane.YES_NO_OPTION) != JOptionPane.YES_OPTION) {
             return false;
         }
@@ -595,7 +702,7 @@ public class JPrompter extends JFrame {
             updateTitle();
             return true;
         } catch (IOException e) {
-            error("Could not save " + f.getName() + ":\n" + e.getMessage());
+            error(I18n.t("error.save", f.getName(), e.getMessage()));
             return false;
         }
     }
@@ -603,7 +710,7 @@ public class JPrompter extends JFrame {
     private void pasteAndPrompt() {
         try {
             Clipboard cb = Toolkit.getDefaultToolkit().getSystemClipboard();
-            if (!cb.isDataFlavorAvailable(DataFlavor.stringFlavor)) { error("The clipboard has no text."); return; }
+            if (!cb.isDataFlavorAvailable(DataFlavor.stringFlavor)) { error(I18n.t("error.clipboardEmpty")); return; }
             if (!confirmDiscard()) return;
             editor.setText((String) cb.getData(DataFlavor.stringFlavor));
             currentFile = null;
@@ -612,13 +719,13 @@ public class JPrompter extends JFrame {
             updateTitle();
             showPrompter();
         } catch (Exception e) {
-            error("Could not read the clipboard: " + e.getMessage());
+            error(I18n.t("error.clipboard", e.getMessage()));
         }
     }
 
     private JFileChooser chooser() {
         JFileChooser fc = new JFileChooser(settings.lastDirectory);
-        fc.setFileFilter(new FileNameExtensionFilter("Text files (*.txt, *.md)", "txt", "md", "text"));
+        fc.setFileFilter(new FileNameExtensionFilter(I18n.t("file.filter"), "txt", "md", "text"));
         return fc;
     }
 
@@ -628,7 +735,7 @@ public class JPrompter extends JFrame {
 
     private boolean confirmDiscard() {
         if (!modified) return true;
-        int r = JOptionPane.showConfirmDialog(this, "Save changes to the current script?", "Unsaved changes",
+        int r = JOptionPane.showConfirmDialog(this, I18n.t("dialog.unsaved.message"), I18n.t("dialog.unsaved.title"),
                 JOptionPane.YES_NO_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE);
         if (r == JOptionPane.YES_OPTION) return save();
         return r == JOptionPane.NO_OPTION;
@@ -663,7 +770,7 @@ public class JPrompter extends JFrame {
                         return true;
                     }
                 } catch (Exception e) {
-                    error("Could not open the dropped file: " + e.getMessage());
+                    error(I18n.t("error.drop", e.getMessage()));
                 }
                 return false;
             }
@@ -682,19 +789,28 @@ public class JPrompter extends JFrame {
         updatingControls = true;
         try {
             boolean playing = prompter.isPlaying();
-            playButton.setText(playing ? "Pause" : "Play");
+            playButton.setText(I18n.t(playing ? "play.pause" : "play.play"));
             playButton.setIcon(Icons.colored(playing ? "pause" : "play", 16, Color.WHITE));
             editButton.setSelected(!prompterShown);
             promptButton.setSelected(prompterShown);
             mirrorButton.setSelected(settings.mirrorHorizontal);
+            boolean timed = prompter.isTimed();
+            paceSpeedButton.setSelected(!timed);
+            paceTimeButton.setSelected(timed);
+            paceSpeedItem.setSelected(!timed);
+            paceTimeItem.setSelected(timed);
+            paceCards.show(paceControls, settings.pace.name());
+            durationSpinner.setSeconds(prompter.targetSeconds());
+            autoSpeedValue.setText(String.valueOf(prompter.effectiveSpeed()));
             speedSlider.setValue(settings.speed);
             sizeSlider.setValue(settings.fontSize);
             speedValue.setText(String.valueOf(settings.speed));
             sizeValue.setText(String.valueOf(settings.fontSize));
 
-            modeStatus.setText(prompterShown ? (playing ? "Prompting" : "Prompter · paused") : "Editing");
+            modeStatus.setText(I18n.t(prompterShown ? (playing ? "status.prompting" : "status.paused") : "status.editing"));
             modeStatus.setIcon(Icons.muted(prompterShown ? (playing ? "play" : "pause") : "edit", 14));
-            elapsedStatus.setText(PrompterPanel.fmt(prompter.elapsedSeconds()));
+            elapsedStatus.setText(PrompterPanel.fmt(prompter.elapsedSeconds())
+                    + (timed ? " / " + PrompterPanel.fmt(prompter.targetSeconds()) : ""));
             remainingStatus.setText("-" + PrompterPanel.fmt(prompter.remainingSeconds()));
             progressBar.setValue((int) Math.round(prompter.progress() * 1000));
             percentStatus.setText(Math.round(prompter.progress() * 100) + "%");
@@ -703,19 +819,23 @@ public class JPrompter extends JFrame {
         }
     }
 
-    private void updateEditorStats() {
+    private int wordCount() {
         String t = editor.getText().strip();
-        int words = t.isEmpty() ? 0 : t.split("\\s+").length;
-        wordsLabel.setText(words + (words == 1 ? " word" : " words"));
+        return t.isEmpty() ? 0 : t.split("\\s+").length;
+    }
+
+    private void updateEditorStats() {
+        int words = wordCount();
+        wordsLabel.setText(I18n.t("editor.words", words));
         double minutes = (double) words / WORDS_PER_MINUTE;
-        readTimeLabel.setText(minutes < 1 ? "< 1 min read" : "~" + Math.round(minutes) + " min read");
-        readTimeLabel.setToolTipText("Estimated at " + WORDS_PER_MINUTE + " words per minute");
+        readTimeLabel.setText(minutes < 1 ? I18n.t("editor.readTime.short") : I18n.t("editor.readTime", Math.round(minutes)));
+        readTimeLabel.setToolTipText(I18n.t("editor.readTime.tip", WORDS_PER_MINUTE));
     }
 
     private void updateTitle() {
-        String name = currentFile == null ? "Untitled" : currentFile.getName();
+        String name = currentFile == null ? I18n.t("window.untitled") : currentFile.getName();
         setTitle((modified ? "• " : "") + name + " — JPrompter");
-        fileLabel.setText(currentFile == null ? "Untitled script" : currentFile.getAbsolutePath());
+        fileLabel.setText(currentFile == null ? I18n.t("editor.untitled") : currentFile.getAbsolutePath());
         updateEditorStats();
     }
 
@@ -736,7 +856,16 @@ public class JPrompter extends JFrame {
         JButton b = new JButton(Icons.get(icon, 20));
         b.setToolTipText(tip);
         b.setFocusable(false);
-        b.addActionListener(e -> r.run());
+        b.addActionListener(e -> { r.run(); focusPrompter(); });
+        return b;
+    }
+
+    private JToggleButton paceToggle(String text, String tip, Settings.Pace pace) {
+        JToggleButton b = new JToggleButton(text);
+        b.setToolTipText(tip);
+        b.setFocusable(false);
+        b.putClientProperty(FlatClientProperties.STYLE, "margin: 3,8,3,8");
+        b.addActionListener(e -> setPace(pace));
         return b;
     }
 
@@ -794,6 +923,13 @@ public class JPrompter extends JFrame {
         return l;
     }
 
+    /** A top-level menu whose mnemonic is the first letter of its translated name. */
+    private static JMenu menu(String key) {
+        JMenu m = new JMenu(I18n.t(key));
+        m.setMnemonic(m.getText().charAt(0));
+        return m;
+    }
+
     private static JMenuItem item(String text, String icon, KeyStroke key, Runnable r) {
         JMenuItem i = new JMenuItem(text, icon == null ? null : Icons.get(icon, 16));
         if (key != null) i.setAccelerator(key);
@@ -834,6 +970,7 @@ public class JPrompter extends JFrame {
         System.setProperty("awt.useSystemAAFontSettings", "on");
         System.setProperty("flatlaf.menuBarEmbedded", "true");
         Settings settings = Settings.load();
+        I18n.setLanguage(I18n.Language.fromCode(settings.language));
         SwingUtilities.invokeLater(() -> {
             setupLookAndFeel(settings.darkTheme);
             JPrompter app = new JPrompter(settings);

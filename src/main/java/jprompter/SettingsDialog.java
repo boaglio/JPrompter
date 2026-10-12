@@ -15,33 +15,36 @@ public class SettingsDialog extends JDialog {
 
     private final Settings s;
     private final Runnable onChange;
+    private final Consumer<I18n.Language> onLanguage;
     private final List<Runnable> swatchRefreshers = new ArrayList<>();
     private JPanel form;
     private int row;
 
-    public SettingsDialog(Frame owner, Settings settings, Runnable onChange, Runnable onReset) {
-        super(owner, "Settings", false);
+    public SettingsDialog(Frame owner, Settings settings, Runnable onChange, Runnable onReset,
+                          Consumer<I18n.Language> onLanguage) {
+        super(owner, I18n.t("settings.title"), false);
         this.s = settings;
         this.onChange = onChange;
+        this.onLanguage = onLanguage;
 
         JTabbedPane tabs = new JTabbedPane();
         tabs.putClientProperty(FlatClientProperties.TABBED_PANE_TAB_HEIGHT, 40);
-        tabs.addTab("Text", Icons.get("text", 16), textTab());
-        tabs.addTab("Colors", Icons.get("palette", 16), colorsTab());
-        tabs.addTab("Display", Icons.get("display", 16), displayTab());
-        tabs.addTab("Playback", Icons.get("play", 16), playbackTab());
+        tabs.addTab(I18n.t("settings.tab.text"), Icons.get("text", 16), textTab());
+        tabs.addTab(I18n.t("settings.tab.colors"), Icons.get("palette", 16), colorsTab());
+        tabs.addTab(I18n.t("settings.tab.display"), Icons.get("display", 16), displayTab());
+        tabs.addTab(I18n.t("settings.tab.playback"), Icons.get("play", 16), playbackTab());
 
-        JButton reset = new JButton("Reset to defaults", Icons.get("restart", 16));
+        JButton reset = new JButton(I18n.t("settings.reset"), Icons.get("restart", 16));
         reset.addActionListener(e -> {
-            if (JOptionPane.showConfirmDialog(this, "Reset all prompter settings to their defaults?",
-                    "Reset settings", JOptionPane.OK_CANCEL_OPTION) == JOptionPane.OK_OPTION) {
+            if (JOptionPane.showConfirmDialog(this, I18n.t("settings.reset.confirm"),
+                    I18n.t("settings.reset.title"), JOptionPane.OK_CANCEL_OPTION) == JOptionPane.OK_OPTION) {
                 s.resetPrompterDefaults();
                 onChange.run();
                 dispose();
                 onReset.run();
             }
         });
-        JButton close = new JButton("Done");
+        JButton close = new JButton(I18n.t("settings.done"));
         close.putClientProperty(FlatClientProperties.BUTTON_TYPE, FlatClientProperties.BUTTON_TYPE_ROUND_RECT);
         close.addActionListener(e -> setVisible(false));
 
@@ -77,63 +80,85 @@ public class SettingsDialog extends JDialog {
             }
         });
         font.addActionListener(e -> { s.fontFamily = (String) font.getSelectedItem(); changed(); });
-        add("Font", font);
+        add(I18n.t("settings.font"), font);
 
-        add("Size", intSpinner(s.fontSize, Settings.MIN_FONT, Settings.MAX_FONT, 2,
+        add(I18n.t("settings.size"), intSpinner(s.fontSize, Settings.MIN_FONT, Settings.MAX_FONT, 2,
                 () -> s.fontSize, v -> s.fontSize = v));
-        add("Bold", toggle(s.bold, v -> s.bold = v));
+        add(I18n.t("settings.bold"), toggle(s.bold, v -> s.bold = v));
 
         JSpinner spacing = new JSpinner(new SpinnerNumberModel((double) s.lineSpacing, 0.8, 3.0, 0.1));
         spacing.addChangeListener(e -> { s.lineSpacing = ((Number) spacing.getValue()).floatValue(); changed(); });
-        add("Line spacing", spacing);
+        add(I18n.t("settings.lineSpacing"), spacing);
 
-        add("Side margins (%)", intSpinner(s.marginPercent, 0, 40, 1, () -> s.marginPercent, v -> s.marginPercent = v));
+        add(I18n.t("settings.margins"), intSpinner(s.marginPercent, 0, 40, 1, () -> s.marginPercent, v -> s.marginPercent = v));
 
         JComboBox<Settings.Align> align = new JComboBox<>(Settings.Align.values());
         align.setSelectedItem(s.align);
         align.addActionListener(e -> { s.align = (Settings.Align) align.getSelectedItem(); changed(); });
-        add("Alignment", align);
-        hint("Tip: text inside [square brackets] is shown as a highlighted cue.");
+        add(I18n.t("settings.alignment"), align);
+        hint(I18n.t("settings.hint.cues"));
         return wrap();
     }
 
     private JComponent colorsTab() {
         newForm();
-        add("Text", colorButton("Text color", () -> s.textColor, c -> s.textColor = c));
-        add("Background", colorButton("Background color", () -> s.backgroundColor, c -> s.backgroundColor = c));
-        add("Cues [like this]", colorButton("Cue color", () -> s.cueColor, c -> s.cueColor = c));
-        add("Reading guide", colorButton("Guide color", () -> s.guideColor, c -> s.guideColor = c));
+        add(I18n.t("settings.color.text"), colorButton(I18n.t("settings.color.text.chooser"), () -> s.textColor, c -> s.textColor = c));
+        add(I18n.t("settings.color.background"), colorButton(I18n.t("settings.color.background.chooser"), () -> s.backgroundColor, c -> s.backgroundColor = c));
+        add(I18n.t("settings.color.cue"), colorButton(I18n.t("settings.color.cue.chooser"), () -> s.cueColor, c -> s.cueColor = c));
+        add(I18n.t("settings.color.guide"), colorButton(I18n.t("settings.color.guide.chooser"), () -> s.guideColor, c -> s.guideColor = c));
 
         JPanel presets = new JPanel(new GridLayout(1, 0, 6, 0));
-        presets.add(preset("Classic", Color.WHITE, Color.BLACK));
-        presets.add(preset("Amber", new Color(0xFFD54F), Color.BLACK));
-        presets.add(preset("Paper", new Color(0x1A1A1A), new Color(0xFAFAF7)));
-        presets.add(preset("Night", new Color(0xCFE3FF), new Color(0x0B1220)));
-        add("Presets", presets);
+        presets.add(preset(I18n.t("preset.classic"), Color.WHITE, Color.BLACK));
+        presets.add(preset(I18n.t("preset.amber"), new Color(0xFFD54F), Color.BLACK));
+        presets.add(preset(I18n.t("preset.paper"), new Color(0x1A1A1A), new Color(0xFAFAF7)));
+        presets.add(preset(I18n.t("preset.night"), new Color(0xCFE3FF), new Color(0x0B1220)));
+        add(I18n.t("settings.presets"), presets);
         return wrap();
     }
 
     private JComponent displayTab() {
         newForm();
-        add("Mirror horizontally", toggle(s.mirrorHorizontal, v -> s.mirrorHorizontal = v));
-        add("Mirror vertically", toggle(s.mirrorVertical, v -> s.mirrorVertical = v));
-        add("Reading guide", toggle(s.showGuide, v -> s.showGuide = v));
+        JComboBox<I18n.Language> language = new JComboBox<>(I18n.Language.values());
+        language.setSelectedItem(I18n.language());
+        language.addActionListener(e -> onLanguage.accept((I18n.Language) language.getSelectedItem()));
+        add(I18n.t("settings.language"), language);
+        add(I18n.t("settings.mirrorH"), toggle(s.mirrorHorizontal, v -> s.mirrorHorizontal = v));
+        add(I18n.t("settings.mirrorV"), toggle(s.mirrorVertical, v -> s.mirrorVertical = v));
+        add(I18n.t("settings.guide"), toggle(s.showGuide, v -> s.showGuide = v));
 
         JSlider guide = new JSlider(5, 80, Math.round(s.guidePosition * 100));
         guide.addChangeListener(e -> { s.guidePosition = guide.getValue() / 100f; changed(); });
-        add("Guide position", guide);
+        add(I18n.t("settings.guidePosition"), guide);
 
-        add("Fade top and bottom", toggle(s.fadeEdges, v -> s.fadeEdges = v));
-        add("Status overlay", toggle(s.showHud, v -> s.showHud = v));
+        add(I18n.t("settings.fade"), toggle(s.fadeEdges, v -> s.fadeEdges = v));
+        add(I18n.t("settings.hud"), toggle(s.showHud, v -> s.showHud = v));
         return wrap();
     }
 
     private JComponent playbackTab() {
         newForm();
-        add("Countdown (seconds)", intSpinner(s.countdownSeconds, 0, 10, 1,
+        add(I18n.t("settings.countdown"), intSpinner(s.countdownSeconds, 0, 10, 1,
                 () -> s.countdownSeconds, v -> s.countdownSeconds = v));
-        add("Speed", intSpinner(s.speed, Settings.MIN_SPEED, Settings.MAX_SPEED, 1, () -> s.speed, v -> s.speed = v));
-        hint("Speed 20 scrolls about one line per second at any text size.");
+        JComboBox<Settings.Pace> pace = new JComboBox<>(Settings.Pace.values());
+        pace.setSelectedItem(s.pace);
+        JSpinner speed = intSpinner(s.speed, Settings.MIN_SPEED, Settings.MAX_SPEED, 1, () -> s.speed, v -> s.speed = v);
+        DurationSpinner target = new DurationSpinner(s.targetSeconds > 0 ? s.targetSeconds : 180,
+                v -> { s.targetSeconds = v; changed(); });
+        Runnable enable = () -> {
+            speed.setEnabled(s.pace == Settings.Pace.SPEED);
+            target.setEnabled(s.pace == Settings.Pace.TIME);
+        };
+        pace.addActionListener(e -> {
+            s.pace = (Settings.Pace) pace.getSelectedItem();
+            if (s.pace == Settings.Pace.TIME && s.targetSeconds <= 0) s.targetSeconds = target.getSeconds();
+            enable.run();
+            changed();
+        });
+        enable.run();
+        add(I18n.t("settings.pace"), pace);
+        add(I18n.t("settings.speed"), speed);
+        add(I18n.t("settings.target"), target);
+        hint(I18n.t("settings.hint.pace"));
         return wrap();
     }
 

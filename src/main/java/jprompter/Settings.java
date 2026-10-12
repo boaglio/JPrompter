@@ -10,9 +10,7 @@ public class Settings {
     public enum Align {
         LEFT, CENTER, RIGHT;
 
-        @Override public String toString() {
-            return name().charAt(0) + name().substring(1).toLowerCase();
-        }
+        @Override public String toString() { return I18n.t("align." + name().toLowerCase()); }
     }
 
     public String fontFamily = "Inter"; // bundled via flatlaf-fonts-inter
@@ -21,6 +19,13 @@ public class Settings {
     public float lineSpacing = 1.3f;
     public int marginPercent = 10;
     public Align align = Align.LEFT;
+
+    /** How the scroll speed is chosen: set by hand, or derived from a target duration. */
+    public enum Pace {
+        SPEED, TIME;
+
+        @Override public String toString() { return I18n.t("pace." + name().toLowerCase()); }
+    }
 
     public Color textColor = Color.WHITE;
     public Color backgroundColor = Color.BLACK;
@@ -37,11 +42,17 @@ public class Settings {
 
     public int countdownSeconds = 3;
     public int speed = 20;
+    public Pace pace = Pace.SPEED;
+    /** Target duration in seconds for {@link Pace#TIME}; 0 means "not set yet". */
+    public int targetSeconds = 0;
 
     public static final int MIN_SPEED = 1, MAX_SPEED = 100;
+    public static final int MIN_TARGET = 10, MAX_TARGET = 4 * 3600;
     public static final int MIN_FONT = 16, MAX_FONT = 200;
 
     public boolean darkTheme = true;
+    /** UI language code (see {@link I18n.Language}); null means "follow the system". */
+    public String language;
     public String lastDirectory;
 
     private static final Preferences PREFS = Preferences.userNodeForPackage(Settings.class);
@@ -71,7 +82,11 @@ public class Settings {
             s.showHud = PREFS.getBoolean("showHud", s.showHud);
             s.countdownSeconds = clamp(PREFS.getInt("countdownSeconds", s.countdownSeconds), 0, 10);
             s.speed = clamp(PREFS.getInt("speed", s.speed), MIN_SPEED, MAX_SPEED);
+            s.pace = Pace.valueOf(PREFS.get("pace", s.pace.name()));
+            s.targetSeconds = PREFS.getInt("targetSeconds", s.targetSeconds);
+            if (s.targetSeconds != 0) s.targetSeconds = clamp(s.targetSeconds, MIN_TARGET, MAX_TARGET);
             s.darkTheme = PREFS.getBoolean("darkTheme", s.darkTheme);
+            s.language = PREFS.get("language", null);
             s.lastDirectory = PREFS.get("lastDirectory", null);
         } catch (RuntimeException e) {
             // Corrupt or unreadable preferences: fall back to defaults.
@@ -100,7 +115,10 @@ public class Settings {
             PREFS.putBoolean("showHud", showHud);
             PREFS.putInt("countdownSeconds", countdownSeconds);
             PREFS.putInt("speed", speed);
+            PREFS.put("pace", pace.name());
+            PREFS.putInt("targetSeconds", targetSeconds);
             PREFS.putBoolean("darkTheme", darkTheme);
+            if (language != null) PREFS.put("language", language);
             if (lastDirectory != null) PREFS.put("lastDirectory", lastDirectory);
             PREFS.flush();
         } catch (Exception e) {
@@ -108,7 +126,7 @@ public class Settings {
         }
     }
 
-    /** Restores the prompter's look and behavior to defaults, keeping the app theme and last folder. */
+    /** Restores the prompter's look and behavior to defaults, keeping the app theme, language and last folder. */
     public void resetPrompterDefaults() {
         Settings d = new Settings();
         fontFamily = d.fontFamily; fontSize = d.fontSize; bold = d.bold; lineSpacing = d.lineSpacing;
@@ -116,7 +134,7 @@ public class Settings {
         textColor = d.textColor; backgroundColor = d.backgroundColor; cueColor = d.cueColor; guideColor = d.guideColor;
         mirrorHorizontal = d.mirrorHorizontal; mirrorVertical = d.mirrorVertical;
         showGuide = d.showGuide; guidePosition = d.guidePosition; fadeEdges = d.fadeEdges; showHud = d.showHud;
-        countdownSeconds = d.countdownSeconds; speed = d.speed;
+        countdownSeconds = d.countdownSeconds; speed = d.speed; pace = d.pace; targetSeconds = d.targetSeconds;
     }
 
     static int clamp(int v, int min, int max) {

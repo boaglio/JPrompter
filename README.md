@@ -7,13 +7,19 @@
 <p align="center">A free and open source teleprompter for your desktop, written in Java.</p>
 
 <p align="center">
+  <a href="https://github.com/boaglio/JPrompter/actions/workflows/build.yml"><img src="https://github.com/boaglio/JPrompter/actions/workflows/build.yml/badge.svg" alt="Build"></a>
+  <a href="https://github.com/boaglio/JPrompter/releases/latest"><img src="https://img.shields.io/github/v/release/boaglio/JPrompter" alt="Latest release"></a>
+</p>
+
+<p align="center">
   <img src="docs/images/prompter.png" alt="JPrompter prompting a script" width="800">
 </p>
 
 ## Features
 
 - **Script editor** with undo/redo, word count and an estimated reading time. You can open and save `.txt` and `.md` files, drag and drop a file onto the window, or paste from the clipboard and start right away.
-- **Smooth scrolling** with adjustable speed. The speed scales with the text size, and a 3-2-1 countdown plays before scrolling starts.
+- **Smooth scrolling** with adjustable speed. The speed scales with the text size, and a 3-2-1 countdown plays before a run starts from the top. Resuming after a pause is instant.
+- **Pace by speed or by time**: set the speed yourself, or enter a duration (such as `3:00`) and the speed is calculated so the script ends exactly on time. The schedule stays on track even if you pause or scroll back.
 - **Mirror mode**, horizontal and/or vertical, for teleprompter glass.
 - **Reading guide**: a highlighted band with arrows at a position you can adjust. The top and bottom edges fade out.
 - **Cues**: `[text in brackets]` is shown in a different color, for stage directions.
@@ -21,6 +27,7 @@
 - **Full-screen mode** with the mouse cursor hidden, plus a status overlay showing elapsed time, time remaining and progress.
 - **Remote friendly**: most USB presentation clickers and foot pedals work out of the box (Page Up, Page Down, Space).
 - **Modern interface** with light and dark themes, built with [FlatLaf](https://www.formdev.com/flatlaf/).
+- **English and Brazilian Portuguese**: switch any time under View → Language. Your script stays open.
 - Settings are remembered between sessions.
 
 <p align="center">
@@ -49,7 +56,8 @@ The jar is self-contained, with its dependencies bundled.
 | Key | Action |
 |---|---|
 | Space / Enter / F5 | Play / pause |
-| ↑ / ↓ (Shift = ×5) | Faster / slower |
+| ↑ / ↓ (Shift = ×5) | Faster / slower (in time mode: shorter / longer by 5 s) |
+| T | Pace by speed / by time |
 | ← / → | Nudge one line |
 | PgUp / PgDn (Shift = screen) | Previous / next paragraph |
 | Home / End | Start / end |
@@ -63,6 +71,15 @@ The jar is self-contained, with its dependencies bundled.
 <p align="center">
   <img src="docs/images/settings.png" alt="Settings window" width="420">
 </p>
+
+## Translations
+
+All UI text lives in properties files in `src/main/resources/jprompter/`:
+
+- `messages.properties`: English (the default)
+- `messages_pt_BR.properties`: Brazilian Portuguese
+
+To add a language, copy `messages.properties` to `messages_<locale>.properties` (for example `messages_es.properties`), translate the values, and add an entry to the `Language` enum in `I18n.java`.
 
 ## Credits
 

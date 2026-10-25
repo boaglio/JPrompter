@@ -12,7 +12,6 @@ import javax.swing.border.EmptyBorder;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.filechooser.FileNameExtensionFilter;
-import javax.swing.undo.UndoManager;
 import java.awt.*;
 import java.awt.datatransfer.Clipboard;
 import java.awt.datatransfer.DataFlavor;
@@ -30,7 +29,7 @@ import java.util.Map;
 /** Main window: script editor + prompter view, toolbar, menus and keyboard shortcuts. */
 public class JPrompter extends JFrame {
 
-    static final String VERSION = "1.0.1";
+    static final String VERSION = "1.1.0";
     static final String WEBSITE = "https://github.com/boaglio/JPrompter";
     static final String ACCENT = "#7C6CF2";
 
@@ -40,8 +39,8 @@ public class JPrompter extends JFrame {
 
     private final Settings settings;
     private final PrompterPanel prompter;
-    private final JTextArea editor = new JTextArea();
-    private final UndoManager undo = new UndoManager();
+    private final MarkdownEditor editor = new MarkdownEditor();
+    private final Map<String, AbstractButton> formatButtons = new java.util.LinkedHashMap<>();
     private final CardLayout cards = new CardLayout();
     private final JPanel center = new JPanel(cards);
     private final JToolBar toolbar = new JToolBar();
@@ -98,7 +97,7 @@ public class JPrompter extends JFrame {
         prompter.setStateListener(this::syncControls);
         editor.setText(I18n.t("sample"));
         editor.setCaretPosition(0);
-        undo.discardAllEdits();
+        editor.discardUndo();
         modified = false;
 
         setMinimumSize(new Dimension(900, 560));
@@ -221,12 +220,9 @@ public class JPrompter extends JFrame {
     }
 
     private JComponent buildEditorPage() {
-        editor.setLineWrap(true);
-        editor.setWrapStyleWord(true);
-        editor.setFont(new Font(FlatInterFont.FAMILY, Font.PLAIN, 18));
-        editor.setMargin(new Insets(18, 22, 18, 22));
+        editor.setFont(new Font(FlatInterFont.FAMILY, Font.PLAIN, MarkdownEditor.BASE_SIZE));
         editor.putClientProperty(FlatClientProperties.PLACEHOLDER_TEXT, I18n.t("editor.placeholder"));
-        editor.getDocument().addUndoableEditListener(e -> undo.addEdit(e.getEdit()));
+        editor.setCaretListener(this::syncFormatBar);
         editor.getDocument().addDocumentListener(new DocumentListener() {
             void changed() {
                 if (!modified) { modified = true; updateTitle(); }
@@ -239,14 +235,6 @@ public class JPrompter extends JFrame {
         });
         editor.setTransferHandler(new FileDropHandler(editor.getTransferHandler()));
         prompter.setTransferHandler(new FileDropHandler(null));
-
-        InputMap im = editor.getInputMap();
-        int menu = Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx();
-        im.put(KeyStroke.getKeyStroke(KeyEvent.VK_Z, menu), "undo");
-        im.put(KeyStroke.getKeyStroke(KeyEvent.VK_Y, menu), "redo");
-        im.put(KeyStroke.getKeyStroke(KeyEvent.VK_Z, menu | InputEvent.SHIFT_DOWN_MASK), "redo");
-        editor.getActionMap().put("undo", action(() -> { if (undo.canUndo()) undo.undo(); }));
-        editor.getActionMap().put("redo", action(() -> { if (undo.canRedo()) undo.redo(); }));
 
         // Header: title + file name on the left, stats on the right.
         JLabel title = new JLabel(I18n.t("editor.title"));
@@ -278,6 +266,7 @@ public class JPrompter extends JFrame {
         JPanel body = new JPanel(new BorderLayout());
         body.setOpaque(false);
         body.setBorder(new EmptyBorder(0, 22, 0, 22));
+        body.add(buildFormatBar(), BorderLayout.NORTH);
         body.add(scroll);
 
         JLabel hint = new JLabel(I18n.t("editor.hint"),
@@ -291,6 +280,56 @@ public class JPrompter extends JFrame {
         page.add(body, BorderLayout.CENTER);
         page.add(hint, BorderLayout.SOUTH);
         return page;
+    }
+
+    /** Formatting buttons above the editor. They insert Markdown, and light up for the styles under the caret. */
+    private JComponent buildFormatBar() {
+        JToolBar bar = new JToolBar();
+        bar.setFloatable(false);
+        bar.setOpaque(false);
+        bar.setBorder(new EmptyBorder(0, 0, 8, 0));
+        for (int level = 1; level <= 3; level++) {
+            int l = level;
+            formatButton(bar, "h" + l, "H" + l, null, "font: bold", () -> editor.toggleBlock(Markdown.Block.HEADING, l));
+        }
+        bar.addSeparator();
+        formatButton(bar, "bold", "B", null, "font: bold", () -> editor.toggleInline("**", "**"));
+        formatButton(bar, "italic", "I", null, "font: italic", () -> editor.toggleInline("*", "*"));
+        formatButton(bar, "strike", "<html><s>S</s></html>", null, null, () -> editor.toggleInline("~~", "~~"));
+        bar.addSeparator();
+        formatButton(bar, "bullet", null, "list", null, () -> editor.toggleBlock(Markdown.Block.BULLET, 0));
+        formatButton(bar, "numbered", null, "list-numbered", null, () -> editor.toggleBlock(Markdown.Block.NUMBERED, 0));
+        formatButton(bar, "quote", null, "quote", null, () -> editor.toggleBlock(Markdown.Block.QUOTE, 0));
+        bar.addSeparator();
+        formatButton(bar, "cue", "[ ]", null, "font: bold", () -> editor.toggleInline("[", "]"));
+        return bar;
+    }
+
+    private void formatButton(JToolBar bar, String name, String text, String icon, String style, Runnable r) {
+        JToggleButton b = new JToggleButton(text, icon == null ? null : Icons.get(icon, 18));
+        b.setToolTipText(I18n.t("format." + name));
+        b.setFocusable(false);
+        b.putClientProperty(FlatClientProperties.STYLE, "margin: 3,7,3,7" + (style == null ? "" : "; " + style));
+        // The editor decides what is selected; the button only reflects it.
+        b.addActionListener(e -> { r.run(); syncFormatBar(); });
+        b.setMaximumSize(b.getPreferredSize());   // HTML labels would otherwise stretch across the bar
+        bar.add(b);
+        formatButtons.put(name, b);
+    }
+
+    private void syncFormatBar() {
+        Markdown.Line line = editor.lineAtCaret();
+        int flags = editor.inlineStylesAtCaret();
+        for (int level = 1; level <= 3; level++) {
+            formatButtons.get("h" + level).setSelected(line.block() == Markdown.Block.HEADING && line.level() == level);
+        }
+        formatButtons.get("bold").setSelected((flags & Markdown.BOLD) != 0);
+        formatButtons.get("italic").setSelected((flags & Markdown.ITALIC) != 0);
+        formatButtons.get("strike").setSelected((flags & Markdown.STRIKE) != 0);
+        formatButtons.get("bullet").setSelected(line.block() == Markdown.Block.BULLET);
+        formatButtons.get("numbered").setSelected(line.block() == Markdown.Block.NUMBERED);
+        formatButtons.get("quote").setSelected(line.block() == Markdown.Block.QUOTE);
+        formatButtons.get("cue").setSelected((flags & Markdown.CUE) != 0);
     }
 
     private void buildStatusBar() {
@@ -504,7 +543,7 @@ public class JPrompter extends JFrame {
         if (!untouchedSample) {
             next.editor.setText(editor.getText());
             next.editor.setCaretPosition(0);
-            next.undo.discardAllEdits();
+            next.editor.discardUndo();
             next.currentFile = currentFile;
             next.modified = modified;
         }
@@ -573,7 +612,7 @@ public class JPrompter extends JFrame {
 
     private void showHelp() {
         String[] shortcuts = {"play", "speed", "pace", "nudge", "paragraph", "startEnd", "size", "mirror",
-                "guide", "fullscreen", "mode", "scroll"};
+                "guide", "fullscreen", "mode", "scroll", "format", "headings", "lists"};
         JPanel grid = new JPanel(new GridBagLayout());
         for (int i = 0; i < shortcuts.length; i++) {
             JLabel key = new JLabel(I18n.t("shortcut." + shortcuts[i] + ".keys"));
@@ -639,7 +678,7 @@ public class JPrompter extends JFrame {
         showEditor();
         editor.setText("");
         currentFile = null;
-        undo.discardAllEdits();
+        editor.discardUndo();
         modified = false;
         prompter.reset();
         updateTitle();
@@ -662,7 +701,7 @@ public class JPrompter extends JFrame {
             if (text.startsWith("﻿")) text = text.substring(1);
             editor.setText(text);
             editor.setCaretPosition(0);
-            undo.discardAllEdits();
+            editor.discardUndo();
             currentFile = f;
             modified = false;
             rememberDir(f);
@@ -683,7 +722,7 @@ public class JPrompter extends JFrame {
         if (currentFile != null) fc.setSelectedFile(currentFile);
         if (fc.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return false;
         File f = fc.getSelectedFile();
-        if (!f.getName().contains(".")) f = new File(f.getParentFile(), f.getName() + ".txt");
+        if (!f.getName().contains(".")) f = new File(f.getParentFile(), f.getName() + ".md");
         if (f.exists() && !f.equals(currentFile)
                 && JOptionPane.showConfirmDialog(this, I18n.t("dialog.overwrite.message", f.getName()),
                 I18n.t("dialog.overwrite.title"),
@@ -725,7 +764,7 @@ public class JPrompter extends JFrame {
 
     private JFileChooser chooser() {
         JFileChooser fc = new JFileChooser(settings.lastDirectory);
-        fc.setFileFilter(new FileNameExtensionFilter(I18n.t("file.filter"), "txt", "md", "text"));
+        fc.setFileFilter(new FileNameExtensionFilter(I18n.t("file.filter"), "md", "markdown", "txt", "text"));
         return fc;
     }
 
@@ -820,7 +859,7 @@ public class JPrompter extends JFrame {
     }
 
     private int wordCount() {
-        String t = editor.getText().strip();
+        String t = Markdown.plain(editor.getText()).strip();
         return t.isEmpty() ? 0 : t.split("\\s+").length;
     }
 

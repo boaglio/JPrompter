@@ -17,7 +17,9 @@
 
 ## Features
 
-- **Script editor** with undo/redo, word count and an estimated reading time. You can open and save `.txt` and `.md` files, drag and drop a file onto the window, or paste from the clipboard and start right away.
+- **Markdown editor** with a live preview: headings, **bold**, *italic*, ~~strikethrough~~, lists and quotes are shown the way they read, and the Markdown symbols stay hidden except on the line you are editing. Format with the toolbar or the keyboard (Ctrl+B, Ctrl+I, Ctrl+1/2/3…). Lists continue when you press Enter. Files are saved as plain Markdown.
+- **Script editor** with undo/redo, word count and an estimated reading time. You can open and save `.md` and `.txt` files, drag and drop a file onto the window, or paste from the clipboard and start right away.
+- **Formatted prompting**: the prompter shows the formatting too, with larger headings and bullets, and no Markdown symbols.
 - **Smooth scrolling** with adjustable speed. The speed scales with the text size, and a 3-2-1 countdown plays before a run starts from the top. Resuming after a pause is instant.
 - **Pace by speed or by time**: set the speed yourself, or enter a duration (such as `3:00`) and the speed is calculated so the script ends exactly on time. The schedule stays on track even if you pause or scroll back.
 - **Mirror mode**, horizontal and/or vertical, for teleprompter glass.
@@ -58,7 +60,7 @@ The launcher scripts build the app on the first run and then start it:
 Add `--build` to rebuild after updating the code. You can also build and run by hand:
 
     mvn package
-    java -jar target/jprompter-1.0.1.jar [script.txt]
+    java -jar target/jprompter-1.1.0.jar [script.txt]
 
 The jar is self-contained, with its dependencies bundled.
 
@@ -78,6 +80,15 @@ The jar is self-contained, with its dependencies bundled.
 | F or F11 / Esc | Enter / leave full screen |
 | Ctrl+E | Switch editor ↔ prompter |
 | F1 | Help |
+
+## Formatting shortcuts (editor)
+
+| Key | Action |
+|---|---|
+| Ctrl+B / Ctrl+I / Ctrl+Shift+X | Bold / italic / strikethrough |
+| Ctrl+K | Cue `[like this]` |
+| Ctrl+1 / 2 / 3, Ctrl+0 | Heading 1 / 2 / 3, plain text |
+| Ctrl+Shift+8 / 7 / 9 | Bulleted list / numbered list / quote |
 
 <p align="center">
   <img src="docs/images/settings.png" alt="Settings window" width="420">

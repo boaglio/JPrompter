@@ -12,19 +12,18 @@ import java.awt.geom.RoundRectangle2D;
 import java.text.AttributedString;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * The scrolling prompter view. Text is word-wrapped into lines and drawn relative to
  * {@link #offset}, the document y-coordinate currently sitting on the reading guide.
- * Text inside [square brackets] is rendered as a cue (italic, cue color).
+ * The script is read as {@link Markdown}: headings, lists and emphasis are rendered and their markers
+ * hidden. Text inside [square brackets] is rendered as a cue (italic, cue color).
  */
 public class PrompterPanel extends JComponent {
 
-    private static final Pattern CUE = Pattern.compile("\\[[^\\]\\n]*\\]");
+    private static final float[] HEADING_SCALE = {1, 1.5f, 1.3f, 1.15f, 1.05f, 1, 1};
 
-    private record Line(TextLayout layout, float top, float x) {}
+    private record Line(TextLayout layout, float top, float x, float ascent) {}
 
     private final Settings settings;
     private Runnable stateListener = () -> {};
@@ -260,7 +259,6 @@ public class PrompterPanel extends JComponent {
         float wrapWidth = Math.max(50, width - 2 * margin);
 
         Font base = settings.font();
-        Font cueFont = base.deriveFont(base.getStyle() | Font.ITALIC);
         LineMetrics lm = base.getLineMetrics("Ág", frc);
         ascent = lm.getAscent();
         lineHeight = (lm.getAscent() + lm.getDescent() + lm.getLeading()) * settings.lineSpacing;
@@ -269,21 +267,17 @@ public class PrompterPanel extends JComponent {
         List<Float> paras = new ArrayList<>();
         float y = 0;
         for (String para : text.split("\n", -1)) {
-            para = para.replace("\r", "").replace("\t", "    ");
-            if (para.isBlank()) { y += lineHeight; continue; }
+            Markdown.Line md = Markdown.parse(para.replace("\r", "").replace("\t", "    "));
+            AttributedString as = styled(md, base);
+            if (as == null) { y += lineHeight; continue; }
             paras.add(y);
 
-            AttributedString as = new AttributedString(para);
-            as.addAttribute(TextAttribute.FONT, base);
-            as.addAttribute(TextAttribute.FOREGROUND, settings.textColor);
-            Matcher m = CUE.matcher(para);
-            while (m.find()) {
-                as.addAttribute(TextAttribute.FONT, cueFont, m.start(), m.end());
-                as.addAttribute(TextAttribute.FOREGROUND, settings.cueColor, m.start(), m.end());
-            }
-
+            boolean heading = md.block() == Markdown.Block.HEADING;
+            float scale = heading ? HEADING_SCALE[md.level()] : 1;
+            if (heading && !out.isEmpty()) y += lineHeight * (scale - 1);   // a little room above headings
+            int length = as.getIterator().getEndIndex();
             LineBreakMeasurer lbm = new LineBreakMeasurer(as.getIterator(), frc);
-            while (lbm.getPosition() < para.length()) {
+            while (lbm.getPosition() < length) {
                 TextLayout tl = lbm.nextLayout(wrapWidth);
                 float adv = tl.getVisibleAdvance();
                 float x = switch (settings.align) {
@@ -291,8 +285,9 @@ public class PrompterPanel extends JComponent {
                     case CENTER -> margin + (wrapWidth - adv) / 2;
                     case RIGHT -> margin + wrapWidth - adv;
                 };
-                out.add(new Line(tl, y, x));
-                y += lineHeight;
+                float height = lineHeight * scale;
+                out.add(new Line(tl, y, x, ascent * scale));
+                y += height;
             }
         }
         lines = out;
@@ -300,6 +295,41 @@ public class PrompterPanel extends JComponent {
         docHeight = y;
         layoutDirty = false;
         layoutWidth = getWidth();
+    }
+
+    /** The line as it is read, with Markdown styles applied; null for a blank line or a horizontal rule. */
+    private AttributedString styled(Markdown.Line md, Font base) {
+        String prefix = md.displayPrefix();
+        StringBuilder text = new StringBuilder(prefix);
+        List<Integer> flags = new ArrayList<>();
+        for (int i = 0; i < prefix.length(); i++) flags.add(0);
+        for (int i = 0; i < md.text().length(); i++) {
+            if (md.isMarker(i)) continue;
+            text.append(md.text().charAt(i));
+            flags.add(md.style()[i]);
+        }
+        if (md.block() == Markdown.Block.RULE || text.toString().isBlank()) return null;
+
+        boolean heading = md.block() == Markdown.Block.HEADING;
+        float size = base.getSize2D() * (heading ? HEADING_SCALE[md.level()] : 1);
+        AttributedString as = new AttributedString(text.toString());
+        int i = 0;
+        while (i < flags.size()) {
+            int f = flags.get(i), j = i + 1;
+            while (j < flags.size() && flags.get(j) == f) j++;
+            int style = base.getStyle();
+            if (heading || (f & Markdown.BOLD) != 0) style |= Font.BOLD;
+            if ((f & (Markdown.ITALIC | Markdown.CUE)) != 0 || md.block() == Markdown.Block.QUOTE) style |= Font.ITALIC;
+            Font font = (f & Markdown.CODE) != 0
+                    ? new Font(Font.MONOSPACED, style, Math.round(size))
+                    : base.deriveFont(style, size);
+            as.addAttribute(TextAttribute.FONT, font, i, j);
+            as.addAttribute(TextAttribute.FOREGROUND, (f & Markdown.CUE) != 0 ? settings.cueColor : settings.textColor, i, j);
+            if ((f & Markdown.STRIKE) != 0) as.addAttribute(TextAttribute.STRIKETHROUGH, TextAttribute.STRIKETHROUGH_ON, i, j);
+            if ((f & Markdown.LINK) != 0) as.addAttribute(TextAttribute.UNDERLINE, TextAttribute.UNDERLINE_ON, i, j);
+            i = j;
+        }
+        return as;
     }
 
     // ---------------------------------------------------------------- painting
@@ -337,7 +367,7 @@ public class PrompterPanel extends JComponent {
                 float top = line.top + shift;
                 if (top + lineHeight < 0) continue;
                 if (top > h) break;
-                line.layout.draw(g, line.x, top + ascent);
+                line.layout.draw(g, line.x, top + line.ascent);
             }
 
             if (settings.fadeEdges) paintFades(g, w, h);

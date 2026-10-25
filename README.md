@@ -43,7 +43,8 @@ Get the latest version from the [releases page](https://github.com/boaglio/JProm
 
 | Platform | File | How to run |
 |---|---|---|
-| Windows | `JPrompter-<version>-windows-x64.zip` | Unzip it and run `JPrompter\JPrompter.exe` |
+| Windows | `JPrompter-<version>-windows-x64.msi` | Run the installer, then open JPrompter from the Start menu or the desktop |
+| Windows (portable) | `JPrompter-<version>-windows-x64.zip` | Unzip it and run `JPrompter\JPrompter.exe` |
 | Debian / Ubuntu | `jprompter_<version>_amd64.deb` | `sudo apt install ./jprompter_<version>_amd64.deb`, then open JPrompter from the app menu |
 | Other Linux | `JPrompter-<version>-linux-x64.tar.gz` | Extract it and run `JPrompter/bin/JPrompter` |
 | Any OS with Java 21+ | `JPrompter-<version>.jar` | `java -jar JPrompter-<version>.jar` |

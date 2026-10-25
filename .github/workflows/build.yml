@@ -110,10 +110,34 @@ jobs:
             --linux-shortcut \
             --dest .
 
+      # jpackage builds the MSI with WiX. Version 5 is the newest that needs no license fee.
+      - name: Install WiX
+        if: runner.os == 'Windows'
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          wix extension add --global WixToolset.Util.wixext/5.0.2 WixToolset.UI.wixext/5.0.2
+          wix --version
+
       - name: Package for Windows
         if: runner.os == 'Windows'
-        shell: pwsh
-        run: Compress-Archive -Path dist/JPrompter -DestinationPath "JPrompter-$env:VERSION-windows-x64.zip"
+        run: |
+          pwsh -Command "Compress-Archive -Path dist/JPrompter -DestinationPath JPrompter-$VERSION-windows-x64.zip"
+          # The upgrade UUID must never change: it lets a new MSI replace an installed older version.
+          jpackage --type msi \
+            --app-image dist/JPrompter \
+            --name JPrompter \
+            --app-version "$VERSION" \
+            --vendor "Fernando Boaglio" \
+            --description "A teleprompter desktop app" \
+            --license-file LICENSE \
+            --about-url https://github.com/boaglio/JPrompter \
+            --win-upgrade-uuid 655ecaf4-9800-4465-9df3-1a9978ecc854 \
+            --win-dir-chooser \
+            --win-menu \
+            --win-menu-group JPrompter \
+            --win-shortcut \
+            --dest .
+          mv "JPrompter-$VERSION.msi" "JPrompter-$VERSION-windows-x64.msi"
 
       - uses: actions/upload-artifact@v7
         with:
@@ -122,6 +146,7 @@ jobs:
             *.tar.gz
             *.deb
             *.zip
+            *.msi
           if-no-files-found: error
 
   # Pushing a tag like v1.0.1 publishes a GitHub release with the jar and native packages attached.

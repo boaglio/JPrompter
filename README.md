@@ -35,6 +35,17 @@
   <img src="docs/images/editor-light.png" alt="Editor, light theme" width="49%">
 </p>
 
+## Download
+
+Get the latest version from the [releases page](https://github.com/boaglio/JPrompter/releases/latest). The Windows and Linux packages include their own Java runtime, so you don't need Java installed.
+
+| Platform | File | How to run |
+|---|---|---|
+| Windows | `JPrompter-<version>-windows-x64.zip` | Unzip it and run `JPrompter\JPrompter.exe` |
+| Debian / Ubuntu | `jprompter_<version>_amd64.deb` | `sudo apt install ./jprompter_<version>_amd64.deb`, then open JPrompter from the app menu |
+| Other Linux | `JPrompter-<version>-linux-x64.tar.gz` | Extract it and run `JPrompter/bin/JPrompter` |
+| Any OS with Java 21+ | `JPrompter-<version>.jar` | `java -jar JPrompter-<version>.jar` |
+
 ## Build & run
 
 You need Java 21 or newer and Maven.
@@ -47,7 +58,7 @@ The launcher scripts build the app on the first run and then start it:
 Add `--build` to rebuild after updating the code. You can also build and run by hand:
 
     mvn package
-    java -jar target/jprompter-1.0.0.jar [script.txt]
+    java -jar target/jprompter-1.0.1.jar [script.txt]
 
 The jar is self-contained, with its dependencies bundled.
 

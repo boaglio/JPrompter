@@ -30,7 +30,7 @@ import java.util.Map;
 /** Main window: script editor + prompter view, toolbar, menus and keyboard shortcuts. */
 public class JPrompter extends JFrame {
 
-    static final String VERSION = "1.0.0";
+    static final String VERSION = "1.0.1";
     static final String WEBSITE = "https://github.com/boaglio/JPrompter";
     static final String ACCENT = "#7C6CF2";
 

@@ -61,7 +61,7 @@ The launcher scripts build the app on the first run and then start it:
 Add `--build` to rebuild after updating the code. You can also build and run by hand:
 
     mvn package
-    java -jar target/jprompter-1.1.0.jar [script.txt]
+    java -jar target/jprompter-1.1.1.jar [script.txt]
 
 The jar is self-contained, with its dependencies bundled.
 
